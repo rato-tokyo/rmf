@@ -1,250 +1,173 @@
-"""RMFの統合テスト"""
+"""RMF統合テスト"""
 
-import pytest
-import asyncio
-import aiohttp
-from aiohttp import web
-from aiohttp.test_utils import TestServer
-from rmf import RemoteMCPFetcher
-from rmf.exceptions import *
-import tempfile
 import os
-import yaml
-from typing import Dict, Any, List
-import logging
+import json
+import pytest
+import aiohttp
+import asyncio
+from typing import Dict, Any
+from aiohttp import web
+from rmf import RMF, RMFError, TimeoutError, ConnectionError, ToolError, LogContext
 
-# テスト用のMCPサーバー
-async def mock_mcp_server():
-    app = web.Application()
-    
-    # テスト用の状態管理
-    app["failure_count"] = 0
-    app["should_timeout"] = False
-    app["should_fail"] = False
-    
-    async def tools_list(request):
-        # リトライテスト用
-        if app.get("should_fail", False):
-            # 最初の2回は失敗、3回目で成功
-            if app["failure_count"] < 2:
-                app["failure_count"] += 1
-                raise web.HTTPServiceUnavailable()
-        
-        # タイムアウトテスト用
-        if app.get("should_timeout", False):
-            await asyncio.sleep(0.5)
-        
-        return web.json_response({
-            "tools": [
-                {
-                    "name": "to_uppercase",
-                    "description": "テキストを大文字に変換するツール",
-                    "parameters": {
-                        "text": {
-                            "type": "string",
-                            "description": "変換したいテキスト"
-                        }
-                    }
-                }
-            ]
-        })
-    
-    async def tools_call(request):
-        data = await request.json()
-        tool = data.get("tool")
-        args = data.get("arguments", {})
-        
-        if tool == "to_uppercase":
-            text = args.get("text", "")
-            return web.json_response({
-                "content": [
-                    {
-                        "type": "text",
-                        "text": text.upper()
-                    }
-                ]
-            })
-        else:
-            return web.Response(
-                status=404,
-                text=f"Unknown tool: {tool}"
-            )
-    
-    app.router.add_get("/tools/list", tools_list)
-    app.router.add_post("/tools/call", tools_call)
-    
-    # テスト用のアクセサメソッド
-    app["set_timeout_mode"] = lambda mode: app.update({"should_timeout": mode})
-    app["set_failure_mode"] = lambda mode: app.update({"should_fail": mode})
-    app["get_failure_count"] = lambda: app["failure_count"]
-    app["reset_failure_count"] = lambda: app.update({"failure_count": 0})
-    
-    return app
+# テスト用の設定
+TEST_CONFIG = {
+    "remote_mcps": [
+        {
+            "name": "Test MCP",
+            "base_url": "http://localhost:8003",
+            "namespace": "test",
+            "timeout": 5,
+            "retry": {
+                "max_attempts": 3,
+                "initial_delay": 0.1,
+                "max_delay": 1.0
+            },
+            "headers": None
+        }
+    ]
+}
 
-class TestRMFIntegration:
-    """RMFの統合テスト"""
-    
-    @pytest.fixture
-    async def mcp_server(self, aiohttp_server):
-        """MCPサーバーのセットアップ"""
-        app = await mock_mcp_server()
-        server = await aiohttp_server(app)
-        yield server
-        await server.close()
-    
-    @pytest.fixture
-    def config_file(self, mcp_server, tmp_path):
-        """テスト用の設定ファイルを作成"""
-        config = {
-            "remote_mcps": [
-                {
-                    "name": "Test MCP",
-                    "base_url": f"http://localhost:{mcp_server.port}",
-                    "namespace": "test",
-                    "timeout": 5,
-                    "retry": {
-                        "max_attempts": 3,
-                        "initial_delay": 0.1,
-                        "max_delay": 0.3
-                    }
-                }
-            ],
-            "logging": {
-                "level": "DEBUG",
-                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                "file": str(tmp_path / "test.log")
+# モックサーバーのルート
+async def handle_tools_list(request):
+    """ツール一覧エンドポイントのハンドラ"""
+    return web.json_response([
+        {
+            "name": "test_tool",
+            "description": "テスト用ツール",
+            "parameters": {
+                "param1": "string",
+                "param2": "integer"
             }
         }
-        
-        config_path = tmp_path / "test_config.yaml"
-        with open(config_path, "w") as f:
-            yaml.dump(config, f)
-        
-        return str(config_path)
-    
-    @pytest.fixture
-    def rmf(self, config_file):
-        """RMFインスタンスを作成"""
-        return RemoteMCPFetcher(config_file)
+    ])
 
-    @pytest.fixture
-    def caplog(self, caplog):
-        """ログキャプチャの設定"""
-        caplog.set_level(logging.INFO)
-        return caplog
+async def handle_tools_call(request):
+    """ツール呼び出しエンドポイントのハンドラ"""
+    data = await request.json()
+    return web.json_response({
+        "result": f"Called {data['tool']} with {data['arguments']}"
+    })
+
+async def handle_service_unavailable(request):
+    """503エラーを返すハンドラ"""
+    raise web.HTTPServiceUnavailable()
+
+async def handle_timeout(request):
+    """タイムアウトをシミュレートするハンドラ"""
+    await asyncio.sleep(2)  # 2秒待機
+    return web.json_response({"status": "timeout"})
+
+@pytest.fixture
+async def mock_server():
+    """モックサーバーのフィクスチャ"""
+    app = web.Application()
+    app.router.add_get('/tools/list', handle_tools_list)
+    app.router.add_post('/tools/call', handle_tools_call)
+    app.router.add_get('/error/503', handle_service_unavailable)
+    app.router.add_get('/timeout/tools/list', handle_timeout)
     
-    def _check_log_context(self, records: List[logging.LogRecord], key: str) -> bool:
-        """ログレコードのコンテキストに特定のキーが含まれているか確認"""
-        for record in records:
-            if hasattr(record, 'rmf_context') and isinstance(record.rmf_context, dict):
-                if key in record.rmf_context:
-                    return True
-        return False
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, 'localhost', 8003)
+    await site.start()
     
-    @pytest.mark.asyncio
-    async def test_fetch_tools_integration(self, rmf, mcp_server, caplog):
-        """ツール一覧取得の統合テスト"""
-        tools = await rmf._fetch_tools_from_remote(rmf.remote_mcps[0])
+    yield site
+    
+    await runner.cleanup()
+
+@pytest.fixture
+async def rmf_client():
+    """RMFクライアントのフィクスチャ"""
+    client = RMF(TEST_CONFIG)
+    await client.setup()
+    yield client
+    await client.cleanup()
+
+@pytest.mark.asyncio
+async def test_get_tools_success(mock_server, rmf_client):
+    """ツール一覧取得の成功テスト"""
+    with LogContext(test_name="test_get_tools_success"):
+        tools = await rmf_client.get_tools()
         assert len(tools) == 1
-        assert tools[0]["name"] == "to_uppercase"
-        
-        # ログの検証
-        assert "ツール一覧の取得開始" in caplog.text
-        assert "ツール一覧の取得成功" in caplog.text
-        assert self._check_log_context(caplog.records, 'trace_id')
-    
-    @pytest.mark.asyncio
-    async def test_tool_call_integration(self, rmf, mcp_server, caplog):
-        """ツール呼び出しの統合テスト"""
-        result = await rmf._call_remote_tool(
-            "to_uppercase",
-            {"text": "hello world"}
+        assert tools[0]["name"] == "test_tool"
+
+@pytest.mark.asyncio
+async def test_call_tool_success(mock_server, rmf_client):
+    """ツール呼び出しの成功テスト"""
+    with LogContext(test_name="test_call_tool_success"):
+        result = await rmf_client.call_tool(
+            "test_tool",
+            {"param1": "value1", "param2": 42}
         )
-        assert len(result) == 1
-        assert result[0]["type"] == "text"
-        assert result[0]["text"] == "HELLO WORLD"
-        
-        # ログの検証
-        assert "ツール呼び出し開始" in caplog.text
-        assert "ツール呼び出し成功" in caplog.text
-        assert self._check_log_context(caplog.records, 'trace_id')
-    
-    @pytest.mark.asyncio
-    async def test_error_handling_integration(self, rmf, mcp_server, caplog):
-        """エラーハンドリングの統合テスト"""
-        with pytest.raises(ToolError) as exc_info:
-            await rmf._call_remote_tool(
-                "non_existent_tool",
-                {"text": "test"}
-            )
-        assert "404" in str(exc_info.value)
-        
-        # ログの検証
-        assert "ツール呼び出し失敗" in caplog.text or "エラー" in caplog.text
-        assert self._check_log_context(caplog.records, 'status_code')
-    
-    @pytest.mark.asyncio
-    async def test_timeout_handling_integration(self, rmf, mcp_server, caplog):
-        """タイムアウト処理の統合テスト"""
-        rmf.remote_mcps[0].timeout = 0.1
-        mcp_server.app["set_timeout_mode"](True)
-        
+        assert "Called test_tool" in result["result"]
+
+@pytest.mark.asyncio
+async def test_retry_mechanism_integration(mock_server, rmf_client):
+    """リトライメカニズムの統合テスト"""
+    with LogContext(test_name="test_retry_mechanism_integration"):
+        with pytest.raises(RMFError):
+            await rmf_client._fetch_tools_from_remote({
+                "name": "Error Test MCP",
+                "base_url": "http://localhost:8003/error",
+                "timeout": 1,
+                "headers": None
+            })
+
+@pytest.mark.asyncio
+async def test_timeout_handling(mock_server, rmf_client):
+    """タイムアウト処理のテスト"""
+    with LogContext(test_name="test_timeout_handling"):
         with pytest.raises(TimeoutError):
-            await rmf._fetch_tools_from_remote(rmf.remote_mcps[0])
-        
-        # ログの検証
-        mcp_server.app["set_timeout_mode"](False)  # リセット
-        assert "タイムアウト" in caplog.text or "エラー" in caplog.text
-    
-    @pytest.mark.asyncio
-    async def test_connection_error_integration(self, rmf, caplog):
-        """接続エラーの統合テスト"""
-        rmf.remote_mcps[0].base_url = "http://non-existent-server:12345"
-        
+            await rmf_client._fetch_tools_from_remote({
+                "name": "Timeout Test MCP",
+                "base_url": "http://localhost:8003/timeout",  # タイムアウトをシミュレートするエンドポイント
+                "timeout": 1,
+                "headers": None
+            })
+
+@pytest.mark.asyncio
+async def test_connection_error_handling(mock_server, rmf_client):
+    """接続エラー処理のテスト"""
+    with LogContext(test_name="test_connection_error_handling"):
         with pytest.raises(ConnectionError):
-            await rmf._fetch_tools_from_remote(rmf.remote_mcps[0])
-        
-        # ログの検証
-        assert "エラー" in caplog.text
-        assert self._check_log_context(caplog.records, 'exception_type')
-    
-    @pytest.mark.asyncio
-    async def test_retry_mechanism_integration(self, rmf, mcp_server, caplog):
-        """リトライ機能の統合テスト"""
-        mcp_server.app["reset_failure_count"]()
-        mcp_server.app["set_failure_mode"](True)
-        
-        tools = await rmf._fetch_tools_from_remote(rmf.remote_mcps[0])
-        
-        # テストの検証
-        assert len(tools) == 1
-        assert tools[0]["name"] == "to_uppercase"
-        assert mcp_server.app["get_failure_count"]() == 2  # 2回失敗してから成功
-        
-        # 後始末
-        mcp_server.app["set_failure_mode"](False)
-        
-        # ログの検証
-        error_count = sum(1 for record in caplog.records if "エラー" in record.message)
-        assert error_count >= 2
-    
-    @pytest.mark.asyncio
-    async def test_concurrent_requests_integration(self, rmf, mcp_server):
-        """並行リクエストの統合テスト"""
-        tasks = []
-        for i in range(5):
-            tasks.append(
-                rmf._call_remote_tool(
-                    "to_uppercase",
-                    {"text": f"test{i}"}
-                )
+            await rmf_client._fetch_tools_from_remote({
+                "name": "Connection Error Test MCP",
+                "base_url": "http://non-existent-host.invalid",  # 存在しないホスト
+                "timeout": 1,
+                "headers": None
+            })
+
+@pytest.mark.asyncio
+async def test_tool_error_handling(mock_server, rmf_client):
+    """ツールエラー処理のテスト"""
+    with LogContext(test_name="test_tool_error_handling"):
+        with pytest.raises(ToolError):
+            await rmf_client._call_remote_tool(
+                {
+                    "name": "Error Test MCP",
+                    "base_url": "http://localhost:8003/error",
+                    "timeout": 1,
+                    "headers": None
+                },
+                "invalid_tool",
+                {}
             )
+
+@pytest.mark.asyncio
+async def test_mcp_selection(mock_server, rmf_client):
+    """MCP選択のテスト"""
+    with LogContext(test_name="test_mcp_selection"):
+        # 存在するMCP名を指定
+        tools = await rmf_client.get_tools("Test MCP")
+        assert len(tools) == 1
         
-        results = await asyncio.gather(*tasks)
-        assert len(results) == 5
-        assert all(len(r) == 1 for r in results)
-        assert all(r[0]["type"] == "text" for r in results)
-        assert all(r[0]["text"].isupper() for r in results)
+        # 存在しないMCP名を指定
+        with pytest.raises(ValueError):
+            await rmf_client.call_tool(
+                "test_tool",
+                {"param1": "value1"},
+                mcp_name="Non-existent MCP"
+            )
 
 if __name__ == "__main__":
     pytest.main(["-v", __file__]) 

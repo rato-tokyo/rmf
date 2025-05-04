@@ -1,10 +1,18 @@
-"""
-Remote MCP Fetcher (RMF) パッケージ
+"""RMF（Remote MCP Framework）パッケージ
+
+リモートMCPとの通信を管理するフレームワーク
 """
 
-from .exceptions import *
-from .logging_config import setup_logger
-from .rmf import RemoteMCPFetcher, RemoteMCPConfig, RetryConfig
+from .rmf import RMF
+from .exceptions import RMFError, TimeoutError, ConnectionError, ToolError
+from .logging import get_logger, LogContext
 
-__version__ = "0.1.0"
-__all__ = ["RemoteMCPFetcher", "RemoteMCPConfig", "RetryConfig", "setup_logger"] 
+__all__ = [
+    'RMF',
+    'RMFError',
+    'TimeoutError',
+    'ConnectionError',
+    'ToolError',
+    'get_logger',
+    'LogContext',
+] 
