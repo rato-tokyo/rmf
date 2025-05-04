@@ -6,8 +6,8 @@
 import asyncio
 import aiohttp
 import backoff
-from typing import Any, Dict, List, Optional
-from .errors import RMFError, TimeoutError, ConnectionError, ToolError
+from typing import Any, Dict, List, Optional, Union
+from .errors import RMFError, ConfigError, TimeoutError, ConnectionError, ToolError
 from .logging import get_logger, LogContext, setup_logging
 
 logger = get_logger(__name__)
@@ -15,25 +15,110 @@ logger = get_logger(__name__)
 class RMF:
     """リモートMCPとの通信を管理するクラス"""
 
+    DEFAULT_CONFIG = {
+        "logging": {
+            "level": "INFO",
+            "file": "rmf.log",
+            "format": "json"
+        },
+        "timeouts": {
+            "connect": 0.1,
+            "read": 5.0
+        },
+        "retry": {
+            "max_attempts": 3,
+            "initial_delay": 0.1,
+            "max_delay": 1.0
+        }
+    }
+
     def __init__(self, config: Dict[str, Any]):
-        """
-        Args:
-            config: MCPの設定情報
-        """
-        self.config = config
+        """初期化
         
-        # logging設定がない場合のデフォルト値を設定
-        if 'logging' not in config:
-            default_logging = {
-                'level': 'INFO',
-                'file': 'rmf.log',
-                'format': 'json'
-            }
-            config['logging'] = default_logging
-            
-        self.logger = setup_logging(config['logging'])
+        Args:
+            config: MCPの設定情報。最低限 "remote_mcps" キーが必要。
+              - remote_mcps: リモートMCPの設定リスト
+                - name: MCP名
+                - base_url: ベースURL
+                - timeout: タイムアウト秒数（デフォルト: 5）
+                - headers: リクエストヘッダー（オプション）
+              - logging: ロギング設定（オプション）
+                - level: ログレベル
+                - file: ログファイル名
+                - format: ログフォーマット
+        
+        Raises:
+            ConfigError: 必須設定が不足している場合
+        """
+        # 設定の検証
+        if not config or not isinstance(config, dict):
+            raise ConfigError("設定が提供されていません", {"provided": str(type(config))})
+        
+        if "remote_mcps" not in config or not config["remote_mcps"]:
+            raise ConfigError("remote_mcps 設定が不足しています", {"config_keys": list(config.keys())})
+        
+        # 設定のマージ（再帰的にデフォルト値を適用）
+        self.config = self._merge_config(self.DEFAULT_CONFIG, config)
+        
+        # リモートMCPの設定を検証・正規化
+        self._validate_remote_mcps()
+        
+        # ロギング設定
+        self.logger = setup_logging(self.config["logging"])
         self._session = None
         self._tools_cache = {}
+    
+    def _merge_config(self, default: Dict[str, Any], user: Dict[str, Any]) -> Dict[str, Any]:
+        """設定をマージする（デフォルト値に上書き）
+        
+        Args:
+            default: デフォルト設定
+            user: ユーザー設定
+            
+        Returns:
+            マージした設定
+        """
+        result = default.copy()
+        
+        for key, value in user.items():
+            # 既存のディクショナリ値は再帰的にマージ
+            if (
+                key in result and
+                isinstance(result[key], dict) and
+                isinstance(value, dict)
+            ):
+                result[key] = self._merge_config(result[key], value)
+            else:
+                result[key] = value
+                
+        return result
+    
+    def _validate_remote_mcps(self):
+        """リモートMCP設定を検証・正規化する
+        
+        Raises:
+            ConfigError: MCP設定が無効な場合
+        """
+        for i, mcp in enumerate(self.config["remote_mcps"]):
+            # 必須パラメータのチェック
+            if "name" not in mcp:
+                raise ConfigError(
+                    f"MCP #{i+1} に name が設定されていません", 
+                    {"mcp_index": i}
+                )
+                
+            if "base_url" not in mcp:
+                raise ConfigError(
+                    f"MCP '{mcp.get('name', f'#{i+1}')}' に base_url が設定されていません",
+                    {"mcp_name": mcp.get("name", f"#{i+1}")}
+                )
+            
+            # デフォルト値の設定
+            if "timeout" not in mcp:
+                mcp["timeout"] = 5.0
+                
+            if "headers" not in mcp:
+                mcp["headers"] = None
 
     async def __aenter__(self):
         """非同期コンテキストマネージャーのエントリーポイント"""
