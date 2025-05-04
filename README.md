@@ -1,38 +1,45 @@
-# Remote MCP Fetcher (RMF)
+# Remote MCP Fetcher プロジェクト
 
-Remote MCP Fetcher（RMF）は、複数のRemote MCPサーバーを統合し、単一のインターフェースとして提供するリレー型MCPサーバーです。
+## プロジェクト概要
 
-## 特徴
+Remote MCP Fetcher (RMF) は、複数のRemote MCPサーバーを統合し、単一のインターフェースとして提供するリレー型MCPサーバーです。
+このプロジェクトは、分散したMCPサービスを効率的に利用するためのソリューションを提供します。
 
-- 複数のRemote MCPを統合して単一のインターフェースを提供
-- 名前空間による各MCPのツール管理
-- Server-Sent Events (SSE)によるリアルタイム通知
-- 設定ファイルによる柔軟な構成
-- 自動リトライ機能
-- 詳細なロギング
+## プロジェクト構成
 
-## 必要条件
+このプロジェクトは3つの主要なコンポーネントに分かれています：
+
+1. [rmf-core](./rmf-core/README.md): コアライブラリ
+   - Remote MCPクライアント実装
+   - 設定管理
+   - エラーハンドリング
+   - ロギング機能
+
+2. [rmf-server](./rmf-server/README.md): サーバーコンポーネント
+   - FastAPIベースのWebサーバー
+   - 標準MCPエンドポイント
+   - ヘルスチェック機能
+   - サーバーサイドのロギング
+
+3. [rmf-tests](./rmf-tests/README.md): テストスイート
+   - 統合テスト
+   - E2Eテスト
+   - パフォーマンステスト
+   - テスト用のモックサーバー
+
+## システム要件
 
 - Python 3.8以上
-- 必要なパッケージ（requirements.txtに記載）
+- Windows 11 (他の環境での動作は未検証)
 
-## インストール
+## クイックスタート
 
-1. リポジトリをクローン：
+1. コアライブラリとサーバーのインストール:
 ```bash
-git clone [repository-url]
-cd rmcp
+pip install rmf-core rmf-server
 ```
 
-2. 依存パッケージをインストール：
-```bash
-pip install -r requirements.txt
-```
-
-## 設定
-
-`config.yaml`ファイルで設定を行います：
-
+2. 設定ファイルの作成 (`config.yaml`):
 ```yaml
 remote_mcps:
   - name: "Fetch MCP"
@@ -41,138 +48,92 @@ remote_mcps:
     timeout: 30
     retry:
       max_attempts: 3
-      initial_delay: 1
-      max_delay: 10
-    headers:
-      User-Agent: "Remote-MCP-Fetcher/1.0"
-
-logging:
-  level: INFO
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "rmf.log"
-
-server:
-  sse_enabled: true
-  sse_retry_timeout: 3000
-  max_concurrent_requests: 10
+      initial_delay: 1.0
+      max_delay: 5.0
 ```
 
-## 設定管理
-
-本プロジェクトは環境変数を使用して設定を管理します。
-
-### 環境設定
-
-- `RMF_ENV`: 実行環境
-  - `production`: 本番環境（デフォルト）
-  - `test`: テスト環境
-  - `development`: 開発環境
-
-### MCP設定
-
-- `RMF_MCP_BASE_URL`: MCPのベースURL（デフォルト: `http://localhost:8003`）
-- `RMF_MCP_TIMEOUT`: MCPのタイムアウト時間（秒）（デフォルト: `5`）
-- `RMF_MCP_RETRY_MAX_ATTEMPTS`: 最大リトライ回数（デフォルト: `3`）
-- `RMF_MCP_RETRY_INITIAL_DELAY`: 初期リトライ待機時間（秒）（デフォルト: `0.1`）
-- `RMF_MCP_RETRY_MAX_DELAY`: 最大リトライ待機時間（秒）（デフォルト: `1.0`）
-
-### ロギング設定
-
-- `RMF_LOG_LEVEL`: ログレベル（デフォルト: `INFO`）
-- `RMF_LOG_FORMAT`: ログフォーマット（デフォルト: `json`）
-- `RMF_LOG_FILE`: ログファイル名
-  - 本番環境: `rmf.log`
-  - テスト環境: `rmf_test.log`
-  - 開発環境: `rmf_dev.log`
-
-### サーバー設定
-
-- `RMF_SERVER_SSE_ENABLED`: SSE有効化フラグ（デフォルト: `true`）
-- `RMF_SERVER_SSE_RETRY_TIMEOUT`: SSEリトライタイムアウト（ミリ秒）
-  - 本番環境: `3000`
-  - テスト環境: `1000`
-  - 開発環境: `1500`
-- `RMF_SERVER_MAX_CONCURRENT_REQUESTS`: 最大同時リクエスト数
-  - 本番環境: `10`
-  - テスト環境: `5`
-  - 開発環境: `3`
-
-### 設定の使用方法
-
-```python
-from config import config
-
-# 設定値の取得
-mcp_config = config.remote_mcps[0]
-log_config = config.logging
-server_config = config.server
-
-# 全ての設定を取得
-all_config = config.get_config()
-```
-
-## 使用方法
-
-1. 設定ファイルを準備：
+3. サーバーの起動:
 ```bash
-cp config.yaml.example config.yaml
-# config.yamlを編集して設定を行う
+rmf-server
 ```
 
-2. サーバーを起動：
+## 開発者向け情報
+
+### 開発環境のセットアップ
+
+1. リポジトリのクローン:
 ```bash
-python rmf-practical.py [config_path]
+git clone https://github.com/yourusername/rmcp.git
+cd rmcp
 ```
 
-設定ファイルのパスを指定しない場合は、デフォルトで`config.yaml`が使用されます。
+2. コアライブラリの開発環境セットアップ:
+```bash
+cd rmf-core
+pip install -e .
+cd ..
+```
 
-## 機能
+3. サーバーの開発環境セットアップ:
+```bash
+cd rmf-server
+pip install -e ".[dev]"
+cd ..
+```
 
-### 1. ツール一覧の取得
+4. テスト環境のセットアップ:
+```bash
+cd rmf-tests
+pip install -e ".[integration,e2e]"
+cd ..
+```
 
-各Remote MCPからツール一覧を取得し、名前空間を付与して統合します。
+### テスト
 
-### 2. ツールの呼び出し
+各種テストの実行:
+```bash
+# ユニットテスト
+cd rmf-core && pytest tests/
+cd ../rmf-server && pytest tests/
 
-指定されたツールを適切なRemote MCPに転送して実行します。
+# 統合テスト
+cd rmf-tests && pytest integration_tests/
 
-### 3. SSE通知
+# E2Eテスト
+cd rmf-tests && pytest e2e_tests/
+```
 
-以下のイベントをリアルタイムで通知します：
+## プロジェクト構造
 
-- `tools_updated`: ツール一覧が更新された時
-- `tool_called`: ツールが呼び出された時
-- `error`: エラーが発生した時
+```
+rmcp/
+├── rmf-core/              # コアライブラリ
+│   ├── rmf/              # RMFコアモジュール
+│   ├── tests/            # ユニットテスト
+│   ├── setup.py          # パッケージ設定
+│   └── README.md         # コアライブラリのドキュメント
+│
+├── rmf-server/           # サーバーコンポーネント
+│   ├── rmf_server/      # サーバー実装
+│   ├── tests/           # ユニットテスト
+│   ├── setup.py         # パッケージ設定
+│   └── README.md        # サーバーのドキュメント
+│
+├── rmf-tests/           # テストスイート
+│   ├── integration_tests/ # 統合テスト
+│   ├── e2e_tests/       # E2Eテスト
+│   ├── setup.py         # パッケージ設定
+│   └── README.md        # テストのドキュメント
+│
+└── README.md            # プロジェクト全体のドキュメント
+```
 
-### 4. エラーハンドリング
+## 開発ステータス
 
-- 自動リトライ機能
-- 詳細なエラーログ
-- エラー通知（SSE）
+現在アクティブに開発中のプロジェクトです。新機能の追加やバグ修正を継続的に行っています。
 
-## エラーハンドリング
+## 注意事項
 
-- ネットワークエラー：自動的にリトライを行います
-- 設定エラー：デフォルト設定にフォールバックします
-- 実行時エラー：ログに記録し、クライアントに通知します
-
-## ログ
-
-ログは設定ファイルで指定したファイルに出力されます。以下の情報が記録されます：
-
-- サーバーの起動/停止
-- ツールの呼び出し
-- エラー情報
-- 接続/切断情報
-
-## 貢献
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a new Pull Request
-
-## ライセンス
-
-[ライセンス情報を記載] 
+- 本番環境での使用前に、十分なテストを行ってください
+- セキュリティ設定は環境に応じて適切に構成してください
+- 大規模な負荷がかかる場合は、適切なスケーリング戦略を検討してください 
