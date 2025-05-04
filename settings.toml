@@ -1,0 +1,44 @@
+[default]
+remote_mcps = [
+    {name = "Text Processing MCP", base_url = "http://localhost:8003", namespace = "text", timeout = 5, retry = {max_attempts = 3, initial_delay = 0.1, max_delay = 1.0}, headers = null}
+]
+
+[default.logging]
+level = "INFO"
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+file = "rmf.log"
+
+[default.server]
+sse_enabled = true
+sse_retry_timeout = 3000
+max_concurrent_requests = 10
+
+[test]
+remote_mcps = [
+    {name = "Text Processing MCP", base_url = "http://localhost:8003", namespace = "text", timeout = 5, retry = {max_attempts = 3, initial_delay = 0.1, max_delay = 1.0}, headers = null}
+]
+
+[test.logging]
+level = "DEBUG"
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+file = "rmf_test.log"
+
+[test.server]
+sse_enabled = true
+sse_retry_timeout = 1000
+max_concurrent_requests = 5
+
+[development]
+remote_mcps = [
+    {name = "Text Processing MCP", base_url = "http://localhost:8003", namespace = "text", timeout = 5, retry = {max_attempts = 3, initial_delay = 0.1, max_delay = 1.0}, headers = null}
+]
+
+[development.logging]
+level = "DEBUG"
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+file = "rmf_dev.log"
+
+[development.server]
+sse_enabled = true
+sse_retry_timeout = 1500
+max_concurrent_requests = 3 
