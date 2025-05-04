@@ -7,8 +7,8 @@ import asyncio
 import aiohttp
 import backoff
 from typing import Any, Dict, List, Optional
-from .exceptions import RMFError, TimeoutError, ConnectionError, ToolError
-from .logging import get_logger, LogContext
+from .errors import RMFError, TimeoutError, ConnectionError, ToolError
+from .logging import get_logger, LogContext, setup_logging
 
 logger = get_logger(__name__)
 
@@ -21,6 +21,17 @@ class RMF:
             config: MCPの設定情報
         """
         self.config = config
+        
+        # logging設定がない場合のデフォルト値を設定
+        if 'logging' not in config:
+            default_logging = {
+                'level': 'INFO',
+                'file': 'rmf.log',
+                'format': 'json'
+            }
+            config['logging'] = default_logging
+            
+        self.logger = setup_logging(config['logging'])
         self._session = None
         self._tools_cache = {}
 
@@ -66,7 +77,7 @@ class RMF:
             ConnectionError: 接続エラー発生
         """
         with LogContext(function="_fetch_tools_from_remote", mcp_name=mcp_config["name"]):
-            logger.info("ツール一覧の取得開始", base_url=mcp_config["base_url"])
+            logger.info("ツール一覧の取得開始", details={"base_url": mcp_config["base_url"]})
 
             try:
                 # 接続タイムアウトを短く、読み取りタイムアウトを長めに設定
@@ -84,21 +95,21 @@ class RMF:
                     ) as response:
                         if response.status == 200:
                             tools = await response.json()
-                            logger.info("ツール一覧の取得成功", tool_count=len(tools))
+                            logger.info("ツール一覧の取得成功", details={"tool_count": len(tools)})
                             return tools
                         else:
                             raise RMFError(f"ツール一覧の取得エラー: HTTP {response.status}")
 
                 except aiohttp.ClientConnectorError as e:
-                    logger.error("ツール一覧の取得エラー", error=str(e))
+                    logger.error("ツール一覧の取得エラー", details={"error": str(e)})
                     raise ConnectionError(f"ツール一覧の取得エラー: {str(e)}") from e
 
                 except aiohttp.ClientError as e:
-                    logger.error("ツール一覧の取得エラー", error=str(e))
+                    logger.error("ツール一覧の取得エラー", details={"error": str(e)})
                     raise ConnectionError(f"ツール一覧の取得エラー: {str(e)}") from e
 
             except asyncio.TimeoutError as e:
-                logger.error("ツール一覧の取得タイムアウト", timeout=mcp_config["timeout"])
+                logger.error("ツール一覧の取得タイムアウト", details={"timeout": mcp_config["timeout"]})
                 raise TimeoutError(f"ツール一覧の取得タイムアウト: {mcp_config['timeout']}秒") from e
 
     @backoff.on_exception(
@@ -153,21 +164,21 @@ class RMF:
                     ) as response:
                         if response.status == 200:
                             result = await response.json()
-                            logger.info("ツール呼び出し成功", result=result)
+                            logger.info("ツール呼び出し成功", details={"result": result})
                             return result
                         else:
                             raise ToolError(f"ツール呼び出し失敗: {tool} (HTTP {response.status})")
 
                 except aiohttp.ClientConnectorError as e:
-                    logger.error("ツール呼び出しエラー", error=str(e))
+                    logger.error("ツール呼び出しエラー", details={"error": str(e)})
                     raise ConnectionError(f"ツール呼び出しエラー: {str(e)}") from e
 
                 except aiohttp.ClientError as e:
-                    logger.error("ツール呼び出しエラー", error=str(e))
+                    logger.error("ツール呼び出しエラー", details={"error": str(e)})
                     raise ConnectionError(f"ツール呼び出しエラー: {str(e)}") from e
 
             except asyncio.TimeoutError as e:
-                logger.error("ツール呼び出しタイムアウト", timeout=mcp_config["timeout"])
+                logger.error("ツール呼び出しタイムアウト", details={"timeout": mcp_config["timeout"]})
                 raise TimeoutError(f"ツール呼び出しタイムアウト: {mcp_config['timeout']}秒") from e
 
     async def get_tools(self, mcp_name: str = None) -> List[Dict[str, Any]]:
@@ -197,16 +208,20 @@ class RMF:
         Args:
             tool: ツール名
             arguments: ツールの引数
-            mcp_name: MCP名（指定がない場合は最初に見つかったMCP）
+            mcp_name: MCP名（指定がない場合は最初に一致するMCP）
 
         Returns:
             ツールの実行結果
 
         Raises:
-            ValueError: 指定されたMCPが見つからない場合
+            ValueError: 指定されたMCPが見つからない
+            ToolError: ツール呼び出しに失敗
         """
         for mcp in self.config["remote_mcps"]:
             if mcp_name is None or mcp["name"] == mcp_name:
                 return await self._call_remote_tool(mcp, tool, arguments)
 
-        raise ValueError(f"指定されたMCPが見つかりません: {mcp_name}") 
+        if mcp_name:
+            raise ValueError(f"指定されたMCP '{mcp_name}' が見つかりません")
+        else:
+            raise ValueError("利用可能なMCPが見つかりません") 

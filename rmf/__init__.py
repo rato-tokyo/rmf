@@ -1,11 +1,14 @@
-"""RMF（Remote MCP Framework）パッケージ
+"""Remote MCP Framework
 
-リモートMCPとの通信を管理するフレームワーク
+複数のRemote MCPサーバーを統合し、単一のインターフェースとして提供するリレー型MCPサーバー。
 """
 
+__version__ = '0.1.0'
+
+from .config import Config, config
+from .errors import RMFError, ConfigError, TimeoutError, ConnectionError, ToolError, SSEError
+from .logging import setup_logging, log_error, StructuredLogger, LogContext
 from .rmf import RMF
-from .exceptions import RMFError, TimeoutError, ConnectionError, ToolError
-from .logging import get_logger, LogContext
 
 __all__ = [
     'RMF',
@@ -13,6 +16,8 @@ __all__ = [
     'TimeoutError',
     'ConnectionError',
     'ToolError',
+    'SSEError',
     'get_logger',
     'LogContext',
+    'StructuredLogger'
 ] 

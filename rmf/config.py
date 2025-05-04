@@ -24,15 +24,13 @@ MCP設定:
 - RMF_SERVER_MAX_CONCURRENT_REQUESTS: 最大同時リクエスト数
 """
 
-from rmf.config import Config, config
-
 import os
 from typing import Dict, Any, List
 from dataclasses import dataclass
 import json
 import logging
-from rmf.errors import ConfigError
-from rmf.logging import setup_logging, log_error
+from .errors import ConfigError
+from .logging import setup_logging, log_error, get_logger
 
 def safe_int(value: str, default: int, param_name: str) -> int:
     """安全に整数に変換"""
@@ -121,14 +119,31 @@ class Config:
         self._logger = None
         
         try:
-            self._mcp_config = MCPConfig()
+            # 先にロギング設定を初期化（他の設定よりも優先）
             self._logging_config = LoggingConfig()
-            self._server_config = ServerConfig()
             
-            # ロガーの初期化
+            # ロガーの初期化（他の設定より先に行う）
             self._setup_logger()
             
-            # 環境に応じた設定の調整（ロガーは再初期化しない）
+            # 残りの設定を初期化
+            try:
+                self._mcp_config = MCPConfig()
+            except ConfigError as e:
+                # MCPConfig初期化エラーをログ出力
+                if self._logger:
+                    error_details = {
+                        'environment': self._env,
+                        'error_code': getattr(e, 'error_code', 'UNKNOWN'),
+                        'parameter': getattr(e, 'details', {}).get('parameter', 'UNKNOWN'),
+                        'value': getattr(e, 'details', {}).get('value', 'UNKNOWN'),
+                        'expected_type': getattr(e, 'details', {}).get('expected_type', 'UNKNOWN')
+                    }
+                    self._logger.error(str(e), error=e, details=error_details)
+                raise
+            
+            self._server_config = ServerConfig()
+            
+            # 環境に応じた設定の調整
             self._adjust_config_for_environment()
             
             # 設定読み込み成功のログを出力
@@ -136,9 +151,14 @@ class Config:
                 'environment': self._env,
                 'mcp_base_url': self._mcp_config.base_url,
                 'log_level': self._logging_config.level,
-                'log_file': self._logging_config.file
+                'log_file': self._logging_config.file,
+                'server': {
+                    'sse_enabled': self._server_config.sse_enabled,
+                    'sse_retry_timeout': self._server_config.sse_retry_timeout,
+                    'max_concurrent_requests': self._server_config.max_concurrent_requests
+                }
             }
-            self._logger.info("Configuration loaded successfully", extra={'details': details})
+            self._logger.info("Configuration loaded successfully", details=details)
         
         except ConfigError as e:
             if self._logger:
@@ -147,59 +167,68 @@ class Config:
                     'error_code': getattr(e, 'error_code', 'UNKNOWN'),
                     'parameter': getattr(e, 'details', {}).get('parameter', 'UNKNOWN'),
                     'value': getattr(e, 'details', {}).get('value', 'UNKNOWN'),
-                    'expected_type': getattr(e, 'details', {}).get('expected_type', 'UNKNOWN')
+                    'expected_type': getattr(e, 'details', {}).get('expected_type', 'UNKNOWN'),
+                    'config_state': {
+                        'logging_config': self._logging_config.__dict__ if hasattr(self, '_logging_config') else None,
+                        'mcp_config': self._mcp_config.__dict__ if hasattr(self, '_mcp_config') else None,
+                        'server_config': self._server_config.__dict__ if hasattr(self, '_server_config') else None
+                    }
                 }
-                # エラーログを出力
-                self._logger.error(
-                    str(e),
-                    exc_info=True,
-                    extra={'details': error_details}
-                )
+                self._logger.error(str(e), error=e, details=error_details)
             raise
     
     def _setup_logger(self):
         """ロガーの設定"""
-        config = {
-            'level': self._logging_config.level,
-            'file': self._logging_config.file,
-            'format': self._logging_config.format
-        }
-        self._logger = setup_logging(config)
+        try:
+            # 構造化ロガーを初期化
+            logger_config = {
+                'level': self._logging_config.level,
+                'file': self._logging_config.file,
+                'format': self._logging_config.format
+            }
+            
+            # 基本ロガーを初期化
+            base_logger = setup_logging(logger_config)
+            
+            # 環境情報を含むコンテキストを設定
+            self._logger = get_logger('rmf', {'environment': self._env})
+            
+            return self._logger
+        except Exception as e:
+            import sys
+            print(f"ロガー設定エラー: {str(e)}", file=sys.stderr)
+            raise
     
     def _adjust_config_for_environment(self):
         """環境に応じて設定を調整"""
         if self._env == 'test':
-            # 設定を調整
             self._logging_config.level = 'DEBUG'
             self._logging_config.file = 'rmf_test.log'
             self._server_config.sse_retry_timeout = 1000
             self._server_config.max_concurrent_requests = 5
-            
-            # 環境設定のログを出力
-            details = {
-                'environment': self._env,
+            self._logger.debug("Test environment configuration applied", details={
+                'environment': 'test',
                 'log_level': self._logging_config.level,
                 'log_file': self._logging_config.file,
-                'sse_retry_timeout': self._server_config.sse_retry_timeout,
-                'max_concurrent_requests': self._server_config.max_concurrent_requests
-            }
-            self._logger.debug("Test environment configuration applied", extra={'details': details})
+                'server_config': {
+                    'sse_retry_timeout': self._server_config.sse_retry_timeout,
+                    'max_concurrent_requests': self._server_config.max_concurrent_requests
+                }
+            })
         elif self._env == 'development':
-            # 設定を調整
             self._logging_config.level = 'DEBUG'
             self._logging_config.file = 'rmf_dev.log'
             self._server_config.sse_retry_timeout = 1500
             self._server_config.max_concurrent_requests = 3
-            
-            # 環境設定のログを出力
-            details = {
-                'environment': self._env,
+            self._logger.debug("Development environment configuration applied", details={
+                'environment': 'development',
                 'log_level': self._logging_config.level,
                 'log_file': self._logging_config.file,
-                'sse_retry_timeout': self._server_config.sse_retry_timeout,
-                'max_concurrent_requests': self._server_config.max_concurrent_requests
-            }
-            self._logger.debug("Development environment configuration applied", extra={'details': details})
+                'server_config': {
+                    'sse_retry_timeout': self._server_config.sse_retry_timeout,
+                    'max_concurrent_requests': self._server_config.max_concurrent_requests
+                }
+            })
     
     @property
     def remote_mcps(self) -> List[Dict[str, Any]]:

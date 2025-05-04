@@ -57,6 +57,60 @@ server:
   max_concurrent_requests: 10
 ```
 
+## 設定管理
+
+本プロジェクトは環境変数を使用して設定を管理します。
+
+### 環境設定
+
+- `RMF_ENV`: 実行環境
+  - `production`: 本番環境（デフォルト）
+  - `test`: テスト環境
+  - `development`: 開発環境
+
+### MCP設定
+
+- `RMF_MCP_BASE_URL`: MCPのベースURL（デフォルト: `http://localhost:8003`）
+- `RMF_MCP_TIMEOUT`: MCPのタイムアウト時間（秒）（デフォルト: `5`）
+- `RMF_MCP_RETRY_MAX_ATTEMPTS`: 最大リトライ回数（デフォルト: `3`）
+- `RMF_MCP_RETRY_INITIAL_DELAY`: 初期リトライ待機時間（秒）（デフォルト: `0.1`）
+- `RMF_MCP_RETRY_MAX_DELAY`: 最大リトライ待機時間（秒）（デフォルト: `1.0`）
+
+### ロギング設定
+
+- `RMF_LOG_LEVEL`: ログレベル（デフォルト: `INFO`）
+- `RMF_LOG_FORMAT`: ログフォーマット（デフォルト: `json`）
+- `RMF_LOG_FILE`: ログファイル名
+  - 本番環境: `rmf.log`
+  - テスト環境: `rmf_test.log`
+  - 開発環境: `rmf_dev.log`
+
+### サーバー設定
+
+- `RMF_SERVER_SSE_ENABLED`: SSE有効化フラグ（デフォルト: `true`）
+- `RMF_SERVER_SSE_RETRY_TIMEOUT`: SSEリトライタイムアウト（ミリ秒）
+  - 本番環境: `3000`
+  - テスト環境: `1000`
+  - 開発環境: `1500`
+- `RMF_SERVER_MAX_CONCURRENT_REQUESTS`: 最大同時リクエスト数
+  - 本番環境: `10`
+  - テスト環境: `5`
+  - 開発環境: `3`
+
+### 設定の使用方法
+
+```python
+from config import config
+
+# 設定値の取得
+mcp_config = config.remote_mcps[0]
+log_config = config.logging
+server_config = config.server
+
+# 全ての設定を取得
+all_config = config.get_config()
+```
+
 ## 使用方法
 
 1. 設定ファイルを準備：
