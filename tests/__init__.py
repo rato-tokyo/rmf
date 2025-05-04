@@ -1,0 +1,3 @@
+"""
+Remote MCP Fetcherのテストスイート
+""" 

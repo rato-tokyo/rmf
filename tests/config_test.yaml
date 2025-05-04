@@ -1,0 +1,32 @@
+remote_mcps:
+  - name: "Test MCP 1"
+    base_url: "http://localhost:8001"
+    namespace: "test1"
+    timeout: 5
+    retry:
+      max_attempts: 2
+      initial_delay: 1
+      max_delay: 3
+    headers:
+      User-Agent: "RMF-Test/1.0"
+
+  - name: "Test MCP 2"
+    base_url: "http://localhost:8002"
+    namespace: "test2"
+    timeout: 5
+    retry:
+      max_attempts: 2
+      initial_delay: 1
+      max_delay: 3
+    headers:
+      User-Agent: "RMF-Test/1.0"
+
+logging:
+  level: DEBUG
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "rmf_test.log"
+
+server:
+  sse_enabled: true
+  sse_retry_timeout: 1000
+  max_concurrent_requests: 5 
